@@ -31,7 +31,7 @@ async def lifespan(app: FastAPI):
         await connect_to_mongo()
         logger.info("Application startup completed successfully")
     except Exception as e:
-        logger.error(f"Failed to start application: {e}")
+        logger.error("Failed to start application: %s", e)
         raise
     
     yield
@@ -69,7 +69,7 @@ app.include_router(todo_router)
 async def root():
     """Root endpoint"""
     return {
-        "message": "Welcome to Todo List API",
+        "message": "Welcome to Todo List",
         "version": "1.0.0",
         "docs": "/docs",
         "redoc": "/redoc"
@@ -92,7 +92,7 @@ async def health_check():
             "timestamp": "2024-01-01T00:00:00Z"  # You might want to use actual timestamp
         }
     except Exception as e:
-        logger.error(f"Health check failed: {e}")
+        logger.error("Health check failed: %s", e)
         raise HTTPException(
             status_code=503,
             detail={
@@ -100,13 +100,13 @@ async def health_check():
                 "database": "disconnected",
                 "error": str(e)
             }
-        )
+        ) from e
 
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
     """Global exception handler"""
-    logger.error(f"Unhandled exception: {exc}")
+    logger.error("Unhandled exception: %s", exc)
     return JSONResponse(
         status_code=500,
         content={"detail": "Internal server error"}

@@ -17,8 +17,9 @@ class PyObjectId(ObjectId):
         return ObjectId(v)
 
     @classmethod
-    def __modify_schema__(cls, field_schema):
+    def __get_pydantic_json_schema__(cls, field_schema):
         field_schema.update(type="string")
+        return field_schema
 
 
 class TodoBase(BaseModel):
@@ -26,7 +27,7 @@ class TodoBase(BaseModel):
     title: str = Field(..., min_length=1, max_length=100, description="Todo title")
     description: Optional[str] = Field(None, max_length=500, description="Todo description")
     completed: bool = Field(default=False, description="Todo completion status")
-    priority: Optional[str] = Field(default="medium", regex="^(low|medium|high)$", description="Todo priority")
+    priority: Optional[str] = Field(default="medium", pattern="^(low|medium|high)$", description="Todo priority")
 
 
 class TodoCreate(TodoBase):
@@ -38,7 +39,7 @@ class TodoUpdate(BaseModel):
     title: Optional[str] = Field(None, min_length=1, max_length=100)
     description: Optional[str] = Field(None, max_length=500)
     completed: Optional[bool] = None
-    priority: Optional[str] = Field(None, regex="^(low|medium|high)$")
+    priority: Optional[str] = Field(None, pattern="^(low|medium|high)$")
 
 
 class TodoInDB(TodoBase):
@@ -48,7 +49,7 @@ class TodoInDB(TodoBase):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
     class Config:
-        allow_population_by_field_name = True
+        populate_by_name = True
         arbitrary_types_allowed = True
         json_encoders = {ObjectId: str}
 

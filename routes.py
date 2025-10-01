@@ -26,7 +26,7 @@ async def get_todos(
     skip: int = Query(0, ge=0, description="Number of items to skip"),
     limit: int = Query(100, ge=1, le=1000, description="Number of items to return"),
     completed: Optional[bool] = Query(None, description="Filter by completion status"),
-    priority: Optional[str] = Query(None, regex="^(low|medium|high)$", description="Filter by priority")
+    priority: Optional[str] = Query(None, pattern="^(low|medium|high)$", description="Filter by priority")
 ):
     """Get all todo items with optional filtering and pagination"""
     try:

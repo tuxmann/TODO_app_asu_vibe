@@ -195,7 +195,7 @@ The application runs with auto-reload enabled by default when started with `pyth
 |----------|-------------|---------|
 | `project_db_url` | MongoDB connection URL | `mongodb://localhost:27017` |
 | `project_db_name` | Database name | `todo_app_db` |
-| `API_HOST` | API host | `0.0.0.0` |
+| `API_HOST` | API host | `127.0.0.1` |
 | `API_PORT` | API port | `8000` |
 
 ## Error Handling
