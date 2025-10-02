@@ -69,8 +69,8 @@ async def close_mongo_connection():
 async def create_indexes():
     """Create database indexes for better performance"""
     try:
-        # Create index on created_at field for sorting
-        await db.database.todos.create_index("created_at")
+        # Create index on deadline field for sorting
+        await db.database.todos.create_index("deadline")
         
         # Create text index for searching in title and description
         await db.database.todos.create_index([
@@ -81,7 +81,7 @@ async def create_indexes():
         logger.info("Database indexes created successfully")
         
     except Exception as e:
-        logger.warning(f"Failed to create indexes: {e}")
+        logger.warning("Failed to create indexes: %s", e)
 
 
 async def get_collection(collection_name: str):

@@ -22,8 +22,9 @@ class TodoCRUD:
             
             # Create todo document
             todo_dict = todo_data.dict()
-            todo_dict["created_at"] = datetime.utcnow()
-            todo_dict["updated_at"] = datetime.utcnow()
+            # Convert date to string for MongoDB storage
+            if 'deadline' in todo_dict:
+                todo_dict['deadline'] = todo_dict['deadline'].isoformat()
             
             # Insert into database
             result = await collection.insert_one(todo_dict)
@@ -34,7 +35,7 @@ class TodoCRUD:
             return self._format_todo_response(created_todo)
             
         except Exception as e:
-            logger.error(f"Error creating todo: {e}")
+            logger.error("Error creating todo: %s", e)
             raise
     
     async def get_todo_by_id(self, todo_id: str) -> Optional[TodoResponse]:
@@ -51,7 +52,7 @@ class TodoCRUD:
             return None
             
         except Exception as e:
-            logger.error(f"Error getting todo by ID {todo_id}: {e}")
+            logger.error("Error getting todo by ID %s: %s", todo_id, e)
             raise
     
     async def get_all_todos(
@@ -72,14 +73,14 @@ class TodoCRUD:
             if priority:
                 filter_query["priority"] = priority
             
-            # Execute query with pagination
-            cursor = collection.find(filter_query).sort("created_at", -1).skip(skip).limit(limit)
+            # Execute query with pagination (sort by deadline)
+            cursor = collection.find(filter_query).sort("deadline", 1).skip(skip).limit(limit)
             todos = await cursor.to_list(length=limit)
             
             return [self._format_todo_response(todo) for todo in todos]
             
         except Exception as e:
-            logger.error(f"Error getting todos: {e}")
+            logger.error("Error getting todos: %s", e)
             raise
     
     async def update_todo(self, todo_id: str, todo_update: TodoUpdate) -> Optional[TodoResponse]:
@@ -97,8 +98,9 @@ class TodoCRUD:
                 # No fields to update, return current todo
                 return await self.get_todo_by_id(todo_id)
             
-            # Add updated timestamp
-            update_data["updated_at"] = datetime.utcnow()
+            # Convert date to string for MongoDB storage
+            if 'deadline' in update_data:
+                update_data['deadline'] = update_data['deadline'].isoformat()
             
             # Update the document
             result = await collection.update_one(
@@ -113,7 +115,7 @@ class TodoCRUD:
             return await self.get_todo_by_id(todo_id)
             
         except Exception as e:
-            logger.error(f"Error updating todo {todo_id}: {e}")
+            logger.error("Error updating todo %s: %s", todo_id, e)
             raise
     
     async def delete_todo(self, todo_id: str) -> bool:
@@ -128,24 +130,40 @@ class TodoCRUD:
             return result.deleted_count > 0
             
         except Exception as e:
-            logger.error(f"Error deleting todo {todo_id}: {e}")
+            logger.error("Error deleting todo %s: %s", todo_id, e)
             raise
     
     async def search_todos(self, query: str, skip: int = 0, limit: int = 100) -> List[TodoResponse]:
-        """Search todos by title and description"""
+        """Search todos by title and description with wildcard support"""
         try:
             collection = await get_collection(self.collection_name)
             
-            # Use text search
-            cursor = collection.find(
-                {"$text": {"$search": query}}
-            ).sort("created_at", -1).skip(skip).limit(limit)
+            # Convert wildcard pattern to regex
+            if '*' in query:
+                # Escape special regex characters except *
+                import re
+                escaped_query = re.escape(query).replace(r'\*', '.*')
+                # Create regex pattern (case insensitive, matches anywhere in text)
+                regex_pattern = escaped_query
+                
+                # Use regex search on title and description
+                cursor = collection.find({
+                    "$or": [
+                        {"title": {"$regex": regex_pattern, "$options": "i"}},
+                        {"description": {"$regex": regex_pattern, "$options": "i"}}
+                    ]
+                }).sort("deadline", 1).skip(skip).limit(limit)
+            else:
+                # Use text search for non-wildcard queries
+                cursor = collection.find(
+                    {"$text": {"$search": query}}
+                ).sort("deadline", 1).skip(skip).limit(limit)
             
             todos = await cursor.to_list(length=limit)
             return [self._format_todo_response(todo) for todo in todos]
             
         except Exception as e:
-            logger.error(f"Error searching todos with query '{query}': {e}")
+            logger.error("Error searching todos with query '%s': %s", query, e)
             raise
     
     async def get_todos_count(self, completed: Optional[bool] = None) -> int:
@@ -160,19 +178,28 @@ class TodoCRUD:
             return await collection.count_documents(filter_query)
             
         except Exception as e:
-            logger.error(f"Error getting todos count: {e}")
+            logger.error("Error getting todos count: %s", e)
             raise
     
     def _format_todo_response(self, todo_doc: dict) -> TodoResponse:
         """Convert database document to TodoResponse model"""
+        from datetime import date as dt_date
+        
+        # Convert deadline string back to date object
+        deadline_str = todo_doc.get("deadline")
+        if isinstance(deadline_str, str):
+            deadline = dt_date.fromisoformat(deadline_str)
+        else:
+            deadline = deadline_str
+        
         return TodoResponse(
             id=str(todo_doc["_id"]),
             title=todo_doc["title"],
             description=todo_doc.get("description"),
             completed=todo_doc["completed"],
             priority=todo_doc.get("priority", "medium"),
-            created_at=todo_doc["created_at"],
-            updated_at=todo_doc["updated_at"]
+            deadline=deadline,
+            labels=todo_doc.get("labels", [])
         )
 
 

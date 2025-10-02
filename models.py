@@ -1,6 +1,6 @@
-from pydantic import BaseModel, Field
-from typing import Optional
-from datetime import datetime
+from pydantic import BaseModel, Field, field_validator
+from typing import Optional, List
+from datetime import datetime, date
 from bson import ObjectId
 
 
@@ -27,7 +27,25 @@ class TodoBase(BaseModel):
     title: str = Field(..., min_length=1, max_length=100, description="Todo title")
     description: Optional[str] = Field(None, max_length=500, description="Todo description")
     completed: bool = Field(default=False, description="Todo completion status")
-    priority: Optional[str] = Field(default="medium", pattern="^(low|medium|high)$", description="Todo priority")
+    priority: str = Field(default="medium", pattern="^(high|medium|low)$", description="Todo priority: high, medium, or low")
+    deadline: date = Field(..., description="Deadline date (must be today or later)")
+    labels: List[str] = Field(default_factory=list, description="Labels: Work, Personal, Urgent")
+    
+    @field_validator('deadline')
+    @classmethod
+    def validate_deadline(cls, v):
+        if v < date.today():
+            raise ValueError('Deadline must be today or later')
+        return v
+    
+    @field_validator('labels')
+    @classmethod
+    def validate_labels(cls, v):
+        valid_labels = {'Work', 'Personal', 'Urgent'}
+        for label in v:
+            if label not in valid_labels:
+                raise ValueError(f'Invalid label: {label}. Must be one of: Work, Personal, Urgent')
+        return v
 
 
 class TodoCreate(TodoBase):
@@ -39,19 +57,36 @@ class TodoUpdate(BaseModel):
     title: Optional[str] = Field(None, min_length=1, max_length=100)
     description: Optional[str] = Field(None, max_length=500)
     completed: Optional[bool] = None
-    priority: Optional[str] = Field(None, pattern="^(low|medium|high)$")
+    priority: Optional[str] = Field(None, pattern="^(high|medium|low)$")
+    deadline: Optional[date] = None
+    labels: Optional[List[str]] = None
+    
+    @field_validator('deadline')
+    @classmethod
+    def validate_deadline(cls, v):
+        if v is not None and v < date.today():
+            raise ValueError('Deadline must be today or later')
+        return v
+    
+    @field_validator('labels')
+    @classmethod
+    def validate_labels(cls, v):
+        if v is not None:
+            valid_labels = {'Work', 'Personal', 'Urgent'}
+            for label in v:
+                if label not in valid_labels:
+                    raise ValueError(f'Invalid label: {label}. Must be one of: Work, Personal, Urgent')
+        return v
 
 
 class TodoInDB(TodoBase):
     """Model for todo as stored in database"""
     id: PyObjectId = Field(default_factory=PyObjectId, alias="_id")
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
 
     class Config:
         populate_by_name = True
         arbitrary_types_allowed = True
-        json_encoders = {ObjectId: str}
+        json_encoders = {ObjectId: str, date: lambda v: v.isoformat()}
 
 
 class TodoResponse(BaseModel):
@@ -61,8 +96,8 @@ class TodoResponse(BaseModel):
     description: Optional[str] = None
     completed: bool
     priority: str
-    created_at: datetime
-    updated_at: datetime
+    deadline: date
+    labels: List[str]
 
     class Config:
-        json_encoders = {ObjectId: str}
+        json_encoders = {ObjectId: str, date: lambda v: v.isoformat()}
