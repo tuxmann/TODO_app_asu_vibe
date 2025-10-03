@@ -30,6 +30,7 @@ class TodoBase(BaseModel):
     priority: str = Field(default="medium", pattern="^(high|medium|low)$", description="Todo priority: high, medium, or low")
     deadline: date = Field(..., description="Deadline date (must be today or later)")
     labels: List[str] = Field(default_factory=list, description="Labels: Work, Personal, Urgent")
+    username: str = Field(..., min_length=4, max_length=32, description="Username (4-32 characters)")
     
     @field_validator('deadline')
     @classmethod
@@ -60,6 +61,7 @@ class TodoUpdate(BaseModel):
     priority: Optional[str] = Field(None, pattern="^(high|medium|low)$")
     deadline: Optional[date] = None
     labels: Optional[List[str]] = None
+    username: Optional[str] = Field(None, min_length=4, max_length=32)
     
     @field_validator('deadline')
     @classmethod
@@ -98,6 +100,7 @@ class TodoResponse(BaseModel):
     priority: str
     deadline: date
     labels: List[str]
+    username: str
 
     class Config:
         json_encoders = {ObjectId: str, date: lambda v: v.isoformat()}

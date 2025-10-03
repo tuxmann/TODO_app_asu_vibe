@@ -199,7 +199,8 @@ class TodoCRUD:
             completed=todo_doc["completed"],
             priority=todo_doc.get("priority", "medium"),
             deadline=deadline,
-            labels=todo_doc.get("labels", [])
+            labels=todo_doc.get("labels", []),
+            username=todo_doc["username"]
         )
 
 

@@ -5,12 +5,14 @@ A RESTful API for managing todo items built with FastAPI and MongoDB.
 ## Features
 
 - ✅ Full CRUD operations for todo items
-- 🔍 Search functionality
+- 🔍 Search functionality with wildcard support (*)
 - 📊 Filtering by completion status and priority
 - 📄 Pagination support
-- 🏷️ Priority levels (low, medium, high)
+- 🏷️ Priority levels (high, medium, low)
 - 📝 Detailed descriptions
-- 🕐 Automatic timestamps
+- 📅 Deadline tracking
+- 🏷️ Multiple labels (Work, Personal, Urgent)
+- 👤 Username tracking (4-32 characters)
 - 🔄 Async/await support
 - 📚 Auto-generated API documentation
 
@@ -106,7 +108,11 @@ curl -X POST "http://localhost:8000/api/v1/todos/" \
      -d '{
        "title": "Learn FastAPI",
        "description": "Complete the FastAPI tutorial",
-       "priority": "high"
+       "completed": false,
+       "priority": "high",
+       "deadline": "2025-10-15",
+       "labels": ["Work", "Urgent"],
+       "username": "john_doe"
      }'
 ```
 
@@ -132,7 +138,14 @@ curl "http://localhost:8000/api/v1/todos/?skip=0&limit=10"
 ### Search Todos
 
 ```bash
-curl "http://localhost:8000/api/v1/todos/search?q=FastAPI"
+# Search with wildcard support
+curl "http://localhost:8000/api/v1/todos/search?q=Fast*"
+
+# Search for words starting with "back"
+curl "http://localhost:8000/api/v1/todos/search?q=back*"
+
+# Search for words ending with "end"
+curl "http://localhost:8000/api/v1/todos/search?q=*end"
 ```
 
 ### Update a Todo
@@ -142,7 +155,9 @@ curl -X PUT "http://localhost:8000/api/v1/todos/{todo_id}" \
      -H "Content-Type: application/json" \
      -d '{
        "title": "Learn FastAPI Advanced",
-       "completed": true
+       "completed": true,
+       "priority": "medium",
+       "deadline": "2025-10-20"
      }'
 ```
 
@@ -158,15 +173,29 @@ curl -X DELETE "http://localhost:8000/api/v1/todos/{todo_id}"
 
 ```json
 {
-  "id": "string",
+  "id": "string (auto-generated)",
   "title": "string (required, 1-100 chars)",
   "description": "string (optional, max 500 chars)",
   "completed": "boolean (default: false)",
-  "priority": "string (low|medium|high, default: medium)",
-  "created_at": "datetime",
-  "updated_at": "datetime"
+  "priority": "string (high|medium|low, required, default: medium)",
+  "deadline": "date (required, must be today or later, format: YYYY-MM-DD)",
+  "labels": "array of strings (optional, values: Work|Personal|Urgent)",
+  "username": "string (required, 4-32 chars)"
 }
 ```
+
+### Field Descriptions
+
+- **title**: Brief name of the todo task
+- **description**: Detailed description of the task
+- **completed**: Whether the task is done
+- **priority**: Urgency level - `high`, `medium`, or `low`
+- **deadline**: Due date for the task (ISO 8601 date format)
+- **labels**: Categorization tags (can select multiple)
+  - `Work`: Work-related tasks
+  - `Personal`: Personal tasks
+  - `Urgent`: Time-sensitive tasks
+- **username**: User who created/owns the task
 
 ## Development
 
@@ -203,7 +232,12 @@ The application runs with auto-reload enabled by default when started with `pyth
 The API includes comprehensive error handling:
 
 - **400**: Bad Request (validation errors)
+  - Invalid username length (must be 4-32 characters)
+  - Invalid priority value (must be high, medium, or low)
+  - Invalid label (must be Work, Personal, or Urgent)
+  - Invalid deadline (must be today or later)
 - **404**: Not Found (todo doesn't exist)
+- **422**: Unprocessable Entity (validation errors)
 - **500**: Internal Server Error
 - **503**: Service Unavailable (database connection issues)
 
@@ -213,13 +247,22 @@ The application uses MongoDB with the following features:
 
 - Automatic database and collection creation
 - Indexes for better performance
-- Text search capabilities
+- Text search capabilities with wildcard support
 - Async operations with Motor driver
 
 ### Database Indexes
 
-- `created_at`: For sorting by creation date
+- `deadline`: For sorting by due date (earliest first)
 - Text index on `title` and `description`: For search functionality
+
+### Search Features
+
+The search functionality supports wildcards using the `*` character:
+- `back*` - finds "backend", "backup", "backlog"
+- `*end` - finds "backend", "frontend", "append"
+- `*api*` - finds "fastapi", "api-docs", "web-api"
+
+All searches are **case-insensitive** and search both title and description fields.
 
 ## License
 
