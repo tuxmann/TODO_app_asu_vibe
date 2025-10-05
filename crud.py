@@ -1,38 +1,30 @@
 from typing import List, Optional
-from bson import ObjectId
 from datetime import datetime
 import logging
+import re
+from beanie.operators import RegEx, Text, Or
 
-from database import get_collection
-from models import TodoCreate, TodoUpdate, TodoResponse
+from models import Todo, TodoCreate, TodoUpdate, TodoResponse
 
 logger = logging.getLogger(__name__)
 
 
 class TodoCRUD:
-    """CRUD operations for Todo items"""
-    
-    def __init__(self):
-        self.collection_name = "todos"
+    """CRUD operations for Todo items using Beanie ODM"""
     
     async def create_todo(self, todo_data: TodoCreate) -> TodoResponse:
         """Create a new todo item"""
         try:
-            collection = await get_collection(self.collection_name)
+            # Create Todo document from Pydantic schema
+            # Convert TodoCreate to dict and create Todo document
+            todo_dict = todo_data.model_dump()
+            todo = Todo(**todo_dict)
             
-            # Create todo document
-            todo_dict = todo_data.dict()
-            # Convert date to string for MongoDB storage
-            if 'deadline' in todo_dict:
-                todo_dict['deadline'] = todo_dict['deadline'].isoformat()
+            # Insert into database using Beanie
+            await todo.insert()
             
-            # Insert into database
-            result = await collection.insert_one(todo_dict)
-            
-            # Retrieve the created todo
-            created_todo = await collection.find_one({"_id": result.inserted_id})
-            
-            return self._format_todo_response(created_todo)
+            # Return response
+            return self._to_response(todo)
             
         except Exception as e:
             logger.error("Error creating todo: %s", e)
@@ -41,19 +33,16 @@ class TodoCRUD:
     async def get_todo_by_id(self, todo_id: str) -> Optional[TodoResponse]:
         """Get a todo item by ID"""
         try:
-            if not ObjectId.is_valid(todo_id):
-                return None
-                
-            collection = await get_collection(self.collection_name)
-            todo = await collection.find_one({"_id": ObjectId(todo_id)})
+            # Use Beanie's get method
+            todo = await Todo.get(todo_id)
             
             if todo:
-                return self._format_todo_response(todo)
+                return self._to_response(todo)
             return None
             
         except Exception as e:
-            logger.error("Error getting todo by ID %s: %s", todo_id, e)
-            raise
+            logger.error(f"Error getting todo by ID {todo_id}: {e}")
+            return None
     
     async def get_all_todos(
         self, 
@@ -64,143 +53,135 @@ class TodoCRUD:
     ) -> List[TodoResponse]:
         """Get all todo items with optional filtering"""
         try:
-            collection = await get_collection(self.collection_name)
+            # Build query using Beanie
+            query = Todo.find()
             
-            # Build filter query
-            filter_query = {}
+            # Apply filters
             if completed is not None:
-                filter_query["completed"] = completed
+                query = query.find(Todo.completed == completed)
             if priority:
-                filter_query["priority"] = priority
+                query = query.find(Todo.priority == priority)
             
-            # Execute query with pagination (sort by deadline)
-            cursor = collection.find(filter_query).sort("deadline", 1).skip(skip).limit(limit)
-            todos = await cursor.to_list(length=limit)
+            # Execute query with pagination and sorting
+            todos = await query.sort(+Todo.deadline).skip(skip).limit(limit).to_list()
             
-            return [self._format_todo_response(todo) for todo in todos]
+            return [self._to_response(todo) for todo in todos]
             
         except Exception as e:
-            logger.error("Error getting todos: %s", e)
+            logger.error(f"Error getting todos: {e}")
             raise
     
     async def update_todo(self, todo_id: str, todo_update: TodoUpdate) -> Optional[TodoResponse]:
         """Update a todo item"""
         try:
-            if not ObjectId.is_valid(todo_id):
-                return None
-                
-            collection = await get_collection(self.collection_name)
+            # Get the todo
+            todo = await Todo.get(todo_id)
             
-            # Build update document (only include non-None fields)
-            update_data = {k: v for k, v in todo_update.dict().items() if v is not None}
+            if not todo:
+                return None
+            
+            # Update fields (only non-None values)
+            update_data = todo_update.model_dump(exclude_unset=True)
             
             if not update_data:
-                # No fields to update, return current todo
-                return await self.get_todo_by_id(todo_id)
+                # No fields to update
+                return self._to_response(todo)
             
-            # Convert date to string for MongoDB storage
-            if 'deadline' in update_data:
-                update_data['deadline'] = update_data['deadline'].isoformat()
+            # Update timestamp
+            update_data['updated_at'] = datetime.utcnow()
             
-            # Update the document
-            result = await collection.update_one(
-                {"_id": ObjectId(todo_id)},
-                {"$set": update_data}
-            )
+            # Apply updates to the document
+            for field, value in update_data.items():
+                setattr(todo, field, value)
             
-            if result.matched_count == 0:
-                return None
+            # Save to database
+            await todo.save()
             
-            # Return updated todo
-            return await self.get_todo_by_id(todo_id)
+            return self._to_response(todo)
             
         except Exception as e:
-            logger.error("Error updating todo %s: %s", todo_id, e)
+            logger.error(f"Error updating todo {todo_id}: {e}")
             raise
     
     async def delete_todo(self, todo_id: str) -> bool:
         """Delete a todo item"""
         try:
-            if not ObjectId.is_valid(todo_id):
-                return False
-                
-            collection = await get_collection(self.collection_name)
-            result = await collection.delete_one({"_id": ObjectId(todo_id)})
+            todo = await Todo.get(todo_id)
             
-            return result.deleted_count > 0
+            if not todo:
+                return False
+            
+            # Delete using Beanie
+            await todo.delete()
+            return True
             
         except Exception as e:
-            logger.error("Error deleting todo %s: %s", todo_id, e)
+            logger.error(f"Error deleting todo {todo_id}: {e}")
             raise
     
     async def search_todos(self, query: str, skip: int = 0, limit: int = 100) -> List[TodoResponse]:
-        """Search todos by title and description with wildcard support"""
+        """Search todos by title and description"""
         try:
-            collection = await get_collection(self.collection_name)
-            
-            # Convert wildcard pattern to regex
+            # Handle wildcard search
             if '*' in query:
-                # Escape special regex characters except *
-                import re
+                # Convert wildcard to regex pattern
                 escaped_query = re.escape(query).replace(r'\*', '.*')
-                # Create regex pattern (case insensitive, matches anywhere in text)
-                regex_pattern = escaped_query
                 
-                # Use regex search on title and description
-                cursor = collection.find({
-                    "$or": [
-                        {"title": {"$regex": regex_pattern, "$options": "i"}},
-                        {"description": {"$regex": regex_pattern, "$options": "i"}}
-                    ]
-                }).sort("deadline", 1).skip(skip).limit(limit)
+                # Search using regex in title or description
+                todos = await Todo.find(
+                    Or(
+                        RegEx(Todo.title, escaped_query, options='i'),
+                        RegEx(Todo.description, escaped_query, options='i')
+                    )
+                ).sort(+Todo.deadline).skip(skip).limit(limit).to_list()
             else:
-                # Use text search for non-wildcard queries
-                cursor = collection.find(
-                    {"$text": {"$search": query}}
-                ).sort("deadline", 1).skip(skip).limit(limit)
+                # Use text search
+                todos = await Todo.find(
+                    Text(query)
+                ).sort(+Todo.deadline).skip(skip).limit(limit).to_list()
             
-            todos = await cursor.to_list(length=limit)
-            return [self._format_todo_response(todo) for todo in todos]
+            return [self._to_response(todo) for todo in todos]
             
         except Exception as e:
-            logger.error("Error searching todos with query '%s': %s", query, e)
+            logger.error(f"Error searching todos with query '{query}': {e}")
             raise
     
     async def get_todos_count(self, completed: Optional[bool] = None) -> int:
         """Get total count of todos"""
         try:
-            collection = await get_collection(self.collection_name)
+            query = Todo.find()
             
-            filter_query = {}
             if completed is not None:
-                filter_query["completed"] = completed
+                query = query.find(Todo.completed == completed)
             
-            return await collection.count_documents(filter_query)
+            return await query.count()
             
         except Exception as e:
-            logger.error("Error getting todos count: %s", e)
+            logger.error(f"Error getting todos count: {e}")
             raise
     
-    def _format_todo_response(self, todo_doc: dict) -> TodoResponse:
-        """Convert database document to TodoResponse model"""
-        from datetime import date as dt_date
+    def _to_response(self, todo: Todo) -> TodoResponse:
+        """Convert Todo document to TodoResponse"""
+        from datetime import datetime, date as dt_date
         
-        # Convert deadline string back to date object
-        deadline_str = todo_doc.get("deadline")
-        if isinstance(deadline_str, str):
-            deadline = dt_date.fromisoformat(deadline_str)
-        else:
-            deadline = deadline_str
+        # Convert deadline back to date if it's datetime
+        deadline = todo.deadline
+        if isinstance(deadline, datetime):
+            deadline = deadline.date()
+        elif not isinstance(deadline, dt_date):
+            deadline = dt_date.fromisoformat(str(deadline))
         
         return TodoResponse(
-            id=str(todo_doc["_id"]),
-            title=todo_doc["title"],
-            description=todo_doc.get("description"),
-            completed=todo_doc["completed"],
-            priority=todo_doc.get("priority", "medium"),
+            id=str(todo.id),
+            title=todo.title,
+            description=todo.description,
+            completed=todo.completed,
+            priority=todo.priority,
             deadline=deadline,
-            labels=todo_doc.get("labels", []),
-            username=todo_doc["username"]
+            labels=todo.labels,
+            username=todo.username,
+            created_at=todo.created_at,
+            updated_at=todo.updated_at
         )
 
 

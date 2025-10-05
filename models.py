@@ -1,29 +1,12 @@
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List
 from datetime import datetime, date
-from bson import ObjectId
-
-
-class PyObjectId(ObjectId):
-    """Custom ObjectId type for Pydantic models"""
-    @classmethod
-    def __get_validators__(cls):
-        yield cls.validate
-
-    @classmethod
-    def validate(cls, v):
-        if not ObjectId.is_valid(v):
-            raise ValueError("Invalid ObjectId")
-        return ObjectId(v)
-
-    @classmethod
-    def __get_pydantic_json_schema__(cls, field_schema):
-        field_schema.update(type="string")
-        return field_schema
+from beanie import Document
+from pydantic import ConfigDict
 
 
 class TodoBase(BaseModel):
-    """Base Todo model"""
+    """Base Todo model with shared fields"""
     title: str = Field(..., min_length=1, max_length=100, description="Todo title")
     description: Optional[str] = Field(None, max_length=500, description="Todo description")
     completed: bool = Field(default=False, description="Todo completion status")
@@ -49,12 +32,92 @@ class TodoBase(BaseModel):
         return v
 
 
+class Todo(Document):
+    """Beanie Document model for MongoDB collection"""
+    title: str = Field(..., min_length=1, max_length=100)
+    description: Optional[str] = Field(None, max_length=500)
+    completed: bool = Field(default=False)
+    priority: str = Field(default="medium")
+    deadline: date = Field(...)
+    labels: List[str] = Field(default_factory=list)
+    username: str = Field(..., min_length=4, max_length=32)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    
+    @field_validator('priority')
+    @classmethod
+    def validate_priority(cls, v):
+        if v not in ['high', 'medium', 'low']:
+            raise ValueError('Priority must be high, medium, or low')
+        return v
+    
+    @field_validator('deadline')
+    @classmethod
+    def validate_deadline(cls, v):
+        if isinstance(v, str):
+            v = date.fromisoformat(v)
+        if v < date.today():
+            raise ValueError('Deadline must be today or later')
+        return v
+    
+    @field_validator('labels')
+    @classmethod
+    def validate_labels(cls, v):
+        if not v:
+            return v
+        valid_labels = {'Work', 'Personal', 'Urgent'}
+        for label in v:
+            if label not in valid_labels:
+                raise ValueError(f'Invalid label: {label}. Must be one of: Work, Personal, Urgent')
+        return v
+    
+    class Settings:
+        name = "todos"  # Collection name in MongoDB
+        indexes = [
+            "deadline",  # Index for sorting by deadline
+            "completed",  # Index for filtering by completion status
+            "priority",  # Index for filtering by priority
+            "username",  # Index for filtering by username
+        ]
+        # Configure BSON encoders for date/datetime
+        bson_encoders = {
+            date: lambda v: datetime.combine(v, datetime.min.time()),
+            datetime: lambda v: v
+        }
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "title": "Complete project documentation",
+                "description": "Write comprehensive docs for the API",
+                "completed": False,
+                "priority": "high",
+                "deadline": "2024-12-31",
+                "labels": ["Work", "Urgent"],
+                "username": "john_doe"
+            }
+        }
+
+
 class TodoCreate(TodoBase):
-    """Model for creating a new todo"""
+    """Pydantic schema for creating a new todo"""
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "title": "Complete project documentation",
+                "description": "Write comprehensive docs for the API",
+                "completed": False,
+                "priority": "high",
+                "deadline": "2024-12-31",
+                "labels": ["Work", "Urgent"],
+                "username": "john_doe"
+            }
+        }
 
 
 class TodoUpdate(BaseModel):
-    """Model for updating an existing todo"""
+    """Pydantic schema for updating an existing todo"""
     title: Optional[str] = Field(None, min_length=1, max_length=100)
     description: Optional[str] = Field(None, max_length=500)
     completed: Optional[bool] = None
@@ -81,18 +144,8 @@ class TodoUpdate(BaseModel):
         return v
 
 
-class TodoInDB(TodoBase):
-    """Model for todo as stored in database"""
-    id: PyObjectId = Field(default_factory=PyObjectId, alias="_id")
-
-    class Config:
-        populate_by_name = True
-        arbitrary_types_allowed = True
-        json_encoders = {ObjectId: str, date: lambda v: v.isoformat()}
-
-
 class TodoResponse(BaseModel):
-    """Model for todo API responses"""
+    """Pydantic schema for API responses"""
     id: str = Field(..., description="Todo ID")
     title: str
     description: Optional[str] = None
@@ -101,6 +154,12 @@ class TodoResponse(BaseModel):
     deadline: date
     labels: List[str]
     username: str
-
+    created_at: datetime
+    updated_at: datetime
+    
     class Config:
-        json_encoders = {ObjectId: str, date: lambda v: v.isoformat()}
+        from_attributes = True  # Pydantic v2 way (replaces orm_mode)
+        json_encoders = {
+            datetime: lambda v: v.isoformat(),
+            date: lambda v: v.isoformat()
+        }

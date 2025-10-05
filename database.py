@@ -1,6 +1,6 @@
 import os
 from motor.motor_asyncio import AsyncIOMotorClient
-from pymongo.errors import ServerSelectionTimeoutError
+from beanie import init_beanie
 import logging
 from dotenv import load_dotenv
 
@@ -12,19 +12,13 @@ logger = logging.getLogger(__name__)
 
 class Database:
     client: AsyncIOMotorClient = None
-    database = None
 
 
 db = Database()
 
 
-async def get_database():
-    """Get database instance"""
-    return db.database
-
-
 async def connect_to_mongo():
-    """Create database connection"""
+    """Initialize database connection and Beanie ODM"""
     try:
         # Get configuration from environment variables
         db_url = os.getenv("project_db_url", "mongodb://localhost:27017")
@@ -32,28 +26,34 @@ async def connect_to_mongo():
         
         logger.info(f"Connecting to MongoDB at {db_url}")
         
-        # Create client with timeout settings
+        # Create Motor client
         db.client = AsyncIOMotorClient(
             db_url,
-            serverSelectionTimeoutMS=5000,  # 5 second timeout
-            connectTimeoutMS=10000,  # 10 second connection timeout
-            socketTimeoutMS=10000,   # 10 second socket timeout
+            serverSelectionTimeoutMS=5000,
+            connectTimeoutMS=10000,
+            socketTimeoutMS=10000,
         )
         
         # Test the connection
         await db.client.admin.command('ping')
+        logger.info("Successfully pinged MongoDB")
         
-        # Get database (will be created if it doesn't exist)
-        db.database = db.client[db_name]
+        # Get database
+        database = db.client[db_name]
         
-        # Create indexes for better performance
-        await create_indexes()
+        # Import document models
+        from models import Todo
+        from user_models import User
         
-        logger.info(f"Successfully connected to MongoDB database: {db_name}")
+        # Initialize Beanie with all document models
+        await init_beanie(
+            database=database,
+            document_models=[Todo, User]
+        )
         
-    except ServerSelectionTimeoutError:
-        logger.error("Failed to connect to MongoDB: Server selection timeout")
-        raise
+        logger.info(f"Beanie ODM initialized with database: {db_name}")
+        logger.info("Application startup completed successfully")
+        
     except Exception as e:
         logger.error(f"Failed to connect to MongoDB: {e}")
         raise
@@ -64,26 +64,3 @@ async def close_mongo_connection():
     if db.client:
         db.client.close()
         logger.info("Disconnected from MongoDB")
-
-
-async def create_indexes():
-    """Create database indexes for better performance"""
-    try:
-        # Create index on deadline field for sorting
-        await db.database.todos.create_index("deadline")
-        
-        # Create text index for searching in title and description
-        await db.database.todos.create_index([
-            ("title", "text"),
-            ("description", "text")
-        ])
-        
-        logger.info("Database indexes created successfully")
-        
-    except Exception as e:
-        logger.warning("Failed to create indexes: %s", e)
-
-
-async def get_collection(collection_name: str):
-    """Get a collection from the database"""
-    return db.database[collection_name]
