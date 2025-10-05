@@ -10,9 +10,9 @@ async def example_usage():
     """Example: Complete user management workflow"""
     
     # Import required modules
-    from database import connect_to_mongo, close_mongo_connection
-    from user_models import User, UserCreate, UserUpdate
-    from user_crud import user_crud
+    from app.core.database import connect_to_mongo, close_mongo_connection
+    from app.models.user import User, UserCreate, UserUpdate
+    from app.crud.user import user_crud
     
     print("=" * 60)
     print("User Model Example Usage")

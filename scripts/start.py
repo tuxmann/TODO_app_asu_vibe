@@ -82,7 +82,7 @@ def start_application():
         print("🛑 Press Ctrl+C to stop the server")
         
         uvicorn.run(
-            "main:app",
+            "app.main:app",
             host=host,
             port=port,
             reload=True,
