@@ -51,13 +51,13 @@ class Todo(Document):
             raise ValueError('Priority must be high, medium, or low')
         return v
     
-    @field_validator('deadline')
+    @field_validator('deadline', mode='before')
     @classmethod
     def validate_deadline(cls, v):
         if isinstance(v, str):
             v = date.fromisoformat(v)
-        if v < date.today():
-            raise ValueError('Deadline must be today or later')
+        # Don't validate past dates when loading from database
+        # Only validate on create/update (handled in TodoCreate/TodoUpdate validators)
         return v
     
     @field_validator('labels')
